@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مصروفي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef3ef;--card:#fff;--ink:#12302a;--mute:#5d7a72;--accent:#0f766e;--accent-ink:#fff;--line:#d5e2dc;--warn:#b42318;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1a17;--card:#162621;--ink:#e6f2ee;--mute:#8fb0a6;--accent:#2dd4bf;--accent-ink:#06201b;--line:#27403a;--warn:#ff8a7a}}
+:root[data-theme="dark"]{--bg:#0e1a17;--card:#162621;--ink:#e6f2ee;--mute:#8fb0a6;--accent:#2dd4bf;--accent-ink:#06201b;--line:#27403a;--warn:#ff8a7a}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Cairo',Tahoma,Arial,sans-serif;font-size:17px;line-height:1.6;padding-bottom:110px}
+main{max-width:560px;margin:0 auto;padding:16px}
+h1{font-size:28px;font-weight:800;margin:8px 0 0}
+.date{color:var(--mute);margin:0 0 16px}
+.mic-wrap{text-align:center;margin:8px 0 4px}
+#mic{width:112px;height:112px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);font-size:46px;cursor:pointer;transition:transform .15s,box-shadow .15s}
+#mic:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+#mic.on{transform:scale(1.08);box-shadow:0 0 0 14px color-mix(in srgb,var(--accent) 30%,transparent)}
+#status{min-height:72px;margin:10px 0;text-align:center;color:var(--mute)}
+#status b{color:var(--ink)}
+#status.err{color:var(--warn)}
+.lnk{font:inherit;font-weight:600;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:2px 12px;margin:0 4px;cursor:pointer}
+.manual{display:grid;grid-template-columns:1fr 110px auto;gap:8px;margin-bottom:20px}
+input{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.add{font:inherit;font-weight:600;background:var(--ink);color:var(--bg);border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
+ul{list-style:none;margin:0;padding:0;background:var(--card);border:1px solid var(--line);border-radius:14px}
+li{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+li:last-child{border-bottom:0}
+.name{flex:1;font-weight:600}
+.when{color:var(--mute);font-size:14px}
+.amt{font-weight:800;white-space:nowrap}
+.del{background:none;border:0;color:var(--mute);font-size:22px;cursor:pointer;padding:0 4px}
+.empty{padding:22px 14px;text-align:center;color:var(--mute)}
+.clear{display:block;margin:16px auto 0;font:inherit;background:none;border:1px solid var(--line);color:var(--mute);border-radius:10px;padding:8px 16px;cursor:pointer}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--accent);color:var(--accent-ink);padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px));display:flex;justify-content:space-between;align-items:center;font-weight:800;font-size:22px}
+.bar small{font-weight:600;font-size:15px;opacity:.85}
+</style>
+</head>
+<body>
+<main>
+  <h1>مصروفي</h1>
+  <p class="date" id="date"></p>
+  <div class="mic-wrap"><button id="mic" aria-label="اضغط وتكلم">🎤</button></div>
+  <div id="status">اضغط على المايك وقول: <b>طماطم خمسين وبصل عشرين</b><br>أو قول: <b>الغي الأخير</b></div>
+  <div class="manual">
+    <input id="item" placeholder="البند" aria-label="البند">
+    <input id="amount" type="number" inputmode="decimal" placeholder="المبلغ" aria-label="المبلغ">
+    <button class="add" id="addBtn">أضف</button>
+  </div>
+  <ul id="list"></ul>
+  <button class="clear" id="clear">مسح الكل</button>
+</main>
+<div class="bar"><small id="count"></small><span>الإجمالي: <span id="total">0</span> جنيه</span></div>
+
+<script>
+var KEY='masrofy-v2', entries=[], snap=null, pendingClear=false, retried=false;
+try{entries=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){entries=[]}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(entries))}catch(e){}}
+var $=function(id){return document.getElementById(id)};
+var fmt=function(n){return Number(n).toLocaleString('en-US',{maximumFractionDigits:2})};
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function say(html,err){var s=$('status');s.className=err?'err':'';s.innerHTML=html}
+
+function norm(s){
+  return s.replace(/[٠-٩]/g,function(d){return '٠١٢٣٤٥٦٧٨٩'.indexOf(d)})
+    .replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/٫/g,'.').trim();
+}
+function bare(w){return w.replace(/^ال/,'')}
+
+var W={واحد:1,اتنين:2,اثنين:2,تلاته:3,ثلاثه:3,اربعه:4,خمسه:5,سته:6,سبعه:7,تمانيه:8,ثمانيه:8,تسعه:9,عشره:10,
+تلات:3,اربع:4,خمس:5,سبع:7,تمان:8,تسع:9,
+احداشر:11,اتناشر:12,تلتاشر:13,اربعتاشر:14,خمستاشر:15,ستاشر:16,سبعتاشر:17,تمنتاشر:18,تسعتاشر:19,
+عشرين:20,تلاتين:30,ثلاثين:30,اربعين:40,خمسين:50,ستين:60,سبعين:70,تمانين:80,ثمانين:80,تسعين:90,
+ميه:100,مايه:100,مئه:100,مائه:100,ميتين:200,مئتين:200,تلتميه:300,ثلاثميه:300,ربعميه:400,خمسميه:500,ستميه:600,سبعميه:700,تمنميه:800,تسعميه:900,
+الف:1000,الاف:1000,الفين:2000,نص:0.5,نصف:0.5};
+
+function numVal(w){
+  if(/^[وب]?\d+(\.\d+)?$/.test(w))return {v:parseFloat(w.replace(/^[وب]/,'')),k:'#'};
+  var c=[w,w.replace(/^[وب]/,'')];
+  for(var i=0;i<2;i++)if(W.hasOwnProperty(c[i]))return {v:W[c[i]],k:c[i]};
+  return null;
+}
+
+/* يفهم أكثر من بند في جملة: طماطم خمسين وبصل عشرين */
+function parseMulti(raw){
+  var rawT=raw.trim().split(/\s+/), t=norm(raw).split(/\s+/).filter(Boolean);
+  var out=[], item=[], total=0, grp=0, has=false, after=false;
+  function push(){if(item.length||has)out.push({item:item.join(' '),amount:has?total:null});item=[];total=0;grp=0;has=false}
+  for(var i=0;i<t.length;i++){
+    var w=t[i], n=numVal(w);
+    if(n){
+      if(n.k==='الف'||n.k==='الاف'){if(grp>0){total+=grp*999;grp=0}else total+=1000}
+      else{total+=n.v;if(n.v<1000)grp+=n.v}
+      has=true;continue;
+    }
+    if(w==='و'||w==='ب'||/^جنيه/.test(w))continue;
+    if(has){push();after=true}
+    var word=rawT[i]||w;
+    if(after&&!item.length&&word.charAt(0)==='و'&&word.length>2)word=word.slice(1);
+    item.push(word);
+  }
+  push();
+  return out;
+}
+
+/* أوامر الإلغاء بالصوت */
+var VERBS=['الغي','الغاء','الغ','امسح','مسح','احذف','حذف','شيل'];
+function command(text){
+  var t=norm(text).split(/\s+/).filter(Boolean);
+  if(!t.length||VERBS.indexOf(t[0])<0)return false;
+  var rest=t.slice(1).map(bare).filter(function(w){return w!=='بند'&&w!=='حاجه'&&w!=='ده'});
+  if(!entries.length){say('مفيش بنود تتلغي.',true);return true}
+  if(rest.indexOf('كل')>=0||rest.indexOf('كله')>=0){askClear();return true}
+  if(!rest.length||rest[0]==='اخير'||rest[0]==='اخيره'||rest[0]==='اخر'){
+    var last=entries[0];
+    act(function(){entries.shift()},'اتلغى: <b>'+esc(last.item)+'</b> '+fmt(last.amount));
+    return true;
+  }
+  var name=rest.join(' '), idx=-1;
+  for(var i=0;i<entries.length;i++){
+    var ni=norm(entries[i].item).split(/\s+/).map(bare).join(' ');
+    if(ni&&(ni.indexOf(name)>=0||name.indexOf(ni)>=0)){idx=i;break}
+  }
+  if(idx<0){say('مالقيتش بند اسمه <b>'+esc(name)+'</b>.',true);return true}
+  var hit=entries[idx];
+  act(function(){entries.splice(idx,1)},'اتلغى: <b>'+esc(hit.item)+'</b> '+fmt(hit.amount));
+  return true;
+}
+function askClear(){
+  pendingClear=true;retried=false;
+  say('تمسح كل البنود ('+entries.length+')؟<br><button class="lnk" id="yes">أيوه، امسح</button><button class="lnk" id="no">لأ</button>',true);
+}
+
+function act(fn,msg){
+  snap=JSON.stringify(entries);fn();save();render();
+  say(msg+' <button class="lnk" id="undo">تراجع</button>');
+}
+$('status').addEventListener('click',function(ev){
+  var id=ev.target.id;
+  if(id==='undo'&&snap!==null){entries=JSON.parse(snap);snap=null;save();render();say('رجّعت اللي كان.')}
+  else if(id==='yes'){doClear()}
+  else if(id==='no'){pendingClear=false;say('تمام، سبت كل حاجة.')}
+});
+function doClear(){pendingClear=false;act(function(){entries=[]},'اتمسح كل شيء.')}
+
+function render(){
+  var ul=$('list');
+  if(!entries.length)ul.innerHTML='<li class="empty">لسه مفيش مصروفات. اضغط على المايك وابدأ.</li>';
+  else ul.innerHTML=entries.map(function(e,i){
+    var d=new Date(e.ts).toLocaleDateString('ar-EG',{day:'numeric',month:'short'});
+    return '<li><span class="name">'+esc(e.item)+' <span class="when">'+d+'</span></span><span class="amt">'+fmt(e.amount)+'</span><button class="del" data-i="'+i+'" aria-label="احذف">×</button></li>';
+  }).join('');
+  var sum=entries.reduce(function(a,e){return a+e.amount},0);
+  $('total').textContent=fmt(sum);
+  $('count').textContent=entries.length?entries.length+' بند':'';
+  $('clear').style.display=entries.length?'block':'none';
+}
+$('list').addEventListener('click',function(ev){
+  var i=ev.target.getAttribute&&ev.target.getAttribute('data-i');
+  if(i===null||i===undefined)return;
+  var e=entries[+i];
+  act(function(){entries.splice(+i,1)},'اتمسح: <b>'+esc(e.item)+'</b>');
+});
+$('addBtn').addEventListener('click',function(){
+  var item=$('item').value.trim(),amt=parseFloat($('amount').value);
+  if(!item||isNaN(amt)){say('اكتب البند والمبلغ الأول.',true);return}
+  act(function(){entries.unshift({id:Date.now(),item:item,amount:amt,ts:Date.now()})},'اتسجل: <b>'+esc(item)+'</b> '+fmt(amt)+' جنيه');
+  $('item').value='';$('amount').value='';
+});
+$('clear').addEventListener('click',function(){if(entries.length)askClear()});
+
+function handle(text){
+  if(pendingClear){
+    if(/(ايوه|ايوا|اه|تمام|اكيد|نعم|امسح)/.test(norm(text)))doClear();
+    else{pendingClear=false;say('تمام، سبت كل حاجة.')}
+    return;
+  }
+  if(command(text))return;
+  var items=parseMulti(text);
+  var ok=items.filter(function(x){return x.item&&x.amount!==null});
+  var bad=items.filter(function(x){return !(x.item&&x.amount!==null)});
+  if(!ok.length){
+    var f=items[0]||{item:text,amount:null};
+    $('item').value=f.item||text;if(f.amount!==null)$('amount').value=f.amount;
+    say('سمعت: <b>'+esc(text)+'</b><br>مقدرتش أفهم البند أو المبلغ، كمّل بإيدك واضغط أضف.',true);return;
+  }
+  var now=Date.now(), msg=ok.map(function(x){return '<b>'+esc(x.item)+'</b> '+fmt(x.amount)}).join('، ');
+  act(function(){ok.forEach(function(x,i){entries.unshift({id:now+i,item:x.item,amount:x.amount,ts:now})})},'اتسجل: '+msg);
+  if(bad.length)$('status').insertAdjacentHTML('beforeend','<br><span style="color:var(--warn)">مفهمتش: '+esc(bad.map(function(x){return x.item}).join('، '))+'</span>');
+}
+
+var SR=window.SpeechRecognition||window.webkitSpeechRecognition, rec=null, listening=false;
+function startRec(){
+  rec=new SR();rec.lang='ar-EG';rec.interimResults=false;rec.maxAlternatives=1;
+  rec.onstart=function(){listening=true;$('mic').classList.add('on');if(!pendingClear)say('بسمعك...')};
+  rec.onend=function(){
+    listening=false;$('mic').classList.remove('on');
+    if(pendingClear&&!retried){retried=true;setTimeout(function(){if(pendingClear&&!listening)startRec()},300)}
+  };
+  rec.onerror=function(e){
+    if(pendingClear)return;
+    say(e.error==='not-allowed'?'اسمح للمتصفح باستخدام المايك من الإعدادات.':e.error==='no-speech'?'مسمعتش حاجة، جرب تاني.':'حصلت مشكلة في الصوت، جرب تاني.',true);
+  };
+  rec.onresult=function(e){handle(e.results[0][0].transcript)};
+  try{rec.start()}catch(err){}
+}
+$('mic').addEventListener('click',function(){
+  if(!SR){say('المتصفح ده مش بيدعم الصوت. افتح الصفحة بكروم على الأندرويد.',true);return}
+  if(listening&&rec){rec.stop();return}
+  startRec();
+});
+$('date').textContent=new Date().toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'long'});
+render();
+</script>
+</body>
+</html>
